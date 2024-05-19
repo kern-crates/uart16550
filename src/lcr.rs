@@ -1,16 +1,17 @@
-﻿use crate::{Register, LCR};
+use crate::{Register, Uart16550IO, LCR};
 
 impl<R: Register> LCR<R> {
     /// 写入线控制设置。
     #[inline]
-    pub fn write(&self, val: LineControl) {
-        unsafe { self.0.get().write_volatile(R::from(val.0)) }
+    pub fn write(&self, io_region: &dyn Uart16550IO<R>, val: LineControl) {
+        io_region.write_at(self.offset, R::from(val.0));
     }
 
     /// 读取线控制设置。
     #[inline]
-    pub fn read(&self) -> LineControl {
-        LineControl(unsafe { self.0.get().read_volatile() }.val())
+    pub fn read(&self, io_region: &dyn Uart16550IO<R>) -> LineControl {
+        let val = io_region.read_at(self.offset).val();
+        LineControl(val)
     }
 }
 
@@ -41,6 +42,18 @@ pub enum CharLen {
     SEVEN = 0b10,
     /// 8 位数据位。
     EIGHT = 0b11,
+}
+
+impl CharLen {
+    const fn from(value: u8) -> Self {
+        match value {
+            0b00 => CharLen::FIVE,
+            0b01 => CharLen::SIX,
+            0b10 => CharLen::SEVEN,
+            0b11 => CharLen::EIGHT,
+            _ => panic!("Invalid value for CharLen"),
+        }
+    }
 }
 
 impl Default for LineControl {
@@ -159,6 +172,6 @@ impl LineControl {
     /// 帧负载长度。
     #[inline]
     pub const fn char_len(self) -> CharLen {
-        unsafe { core::mem::transmute(self.0 & 0b11) }
+        CharLen::from(self.0 & 0b11)
     }
 }

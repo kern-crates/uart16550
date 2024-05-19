@@ -1,16 +1,22 @@
-﻿use crate::{Register, IER};
+use crate::{Register, Uart16550IO, IER};
 
 impl<R: Register> IER<R> {
     /// 写入中断使能设置。
     #[inline]
-    pub fn write(&self, val: InterruptTypes) {
-        unsafe { self.0.get().write_volatile(R::from(val.0)) }
+    pub fn write(&self, io_region: &dyn Uart16550IO<R>, val: InterruptTypes) {
+        io_region.write_at(self.offset, R::from(val.0));
     }
 
     /// 读取中断使能设置。
     #[inline]
-    pub fn read(&self) -> InterruptTypes {
-        InterruptTypes(unsafe { self.0.get().read_volatile() }.val())
+    pub fn read(&self, io_region: &dyn Uart16550IO<R>) -> InterruptTypes {
+        let val = io_region.read_at(self.offset).val();
+        InterruptTypes(val)
+    }
+
+    /// 写入波特率分频器。
+    pub fn write_divisor(&self, io_region: &dyn Uart16550IO<R>, val: R) {
+        io_region.write_at(self.offset, val);
     }
 }
 

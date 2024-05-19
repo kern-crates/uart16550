@@ -1,10 +1,11 @@
-﻿use crate::{Register, LSR};
+use crate::{Register, Uart16550IO, LSR};
 
 impl<R: Register> LSR<R> {
     /// 读取线路状态。
     #[inline]
-    pub fn read(&self) -> LineStatus {
-        LineStatus(unsafe { self.0.get().read_volatile() }.val())
+    pub fn read(&self, io_region: &dyn Uart16550IO<R>) -> LineStatus {
+        let val = io_region.read_at(self.offset).val();
+        LineStatus(val)
     }
 }
 

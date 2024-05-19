@@ -1,10 +1,10 @@
-﻿use crate::{Register, IIR_FCR};
+use crate::{Register, Uart16550IO, IIR_FCR};
 
 impl<R: Register> IIR_FCR<R> {
     /// 写入队列控制设置。
     #[inline]
-    pub fn write(&self, val: FifoControl) {
-        unsafe { self.0.get().write_volatile(R::from(val.0)) }
+    pub fn write(&self, io_region: &dyn Uart16550IO<R>, val: FifoControl) {
+        io_region.write_at(self.offset, R::from(val.0));
     }
 }
 

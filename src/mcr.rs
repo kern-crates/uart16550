@@ -1,16 +1,17 @@
-﻿use crate::{Register, MCR};
+use crate::{Register, Uart16550IO, MCR};
 
 impl<R: Register> MCR<R> {
     /// 写入调制解调器控制设置。
     #[inline]
-    pub fn write(&self, val: ModemControl) {
-        unsafe { self.0.get().write_volatile(R::from(val.0)) }
+    pub fn write(&self, io_region: &dyn Uart16550IO<R>, val: ModemControl) {
+        io_region.write_at(self.offset, R::from(val.0));
     }
 
     /// 读取调制解调器控制设置。
     #[inline]
-    pub fn read(&self) -> ModemControl {
-        ModemControl(unsafe { self.0.get().read_volatile() }.val())
+    pub fn read(&self, io_region: &dyn Uart16550IO<R>) -> ModemControl {
+        let val = io_region.read_at(self.offset).val();
+        ModemControl(val)
     }
 }
 

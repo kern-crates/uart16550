@@ -1,10 +1,11 @@
-﻿use crate::{Register, IIR_FCR};
+use crate::{Register, Uart16550IO, IIR_FCR};
 
 impl<R: Register> IIR_FCR<R> {
     /// 读取中断识别位。
     #[inline]
-    pub fn read(&self) -> InterruptIdentification {
-        InterruptIdentification(unsafe { self.0.get().read_volatile() }.val())
+    pub fn read(&self, io_region: &dyn Uart16550IO<R>) -> InterruptIdentification {
+        let val = io_region.read_at(self.offset).val();
+        InterruptIdentification(val)
     }
 }
 

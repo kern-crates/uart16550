@@ -2,6 +2,8 @@
 
 #![no_std]
 #![deny(warnings, missing_docs)]
+#![forbid(unsafe_code)]
+extern crate alloc;
 
 mod fcr;
 mod ier;
@@ -12,7 +14,9 @@ mod mcr;
 mod msr;
 mod rbr_thr;
 
-use core::cell::UnsafeCell;
+use alloc::boxed::Box;
+use core::fmt::Debug;
+use core::marker::PhantomData;
 
 pub use fcr::{FifoControl, TriggerLevel};
 pub use ier::InterruptTypes;
@@ -47,35 +51,35 @@ impl Register for u32 {
     }
 }
 
-/// 接收缓冲寄存器和发送保持寄存器。
-#[allow(non_camel_case_types)]
-#[repr(transparent)]
-pub struct RBR_THR<R: Register>(UnsafeCell<R>);
+macro_rules! gen_reg {
+    ($name:ident) => {
+        /// Register for $name.
+        #[allow(non_camel_case_types)]
+        pub struct $name<R: Register> {
+            /// Offset of the register.
+            offset: usize,
+            /// Phantom data.
+            phantom_data: PhantomData<R>,
+        }
+    };
+}
 
-/// 中断使能寄存器。
-#[repr(transparent)]
-pub struct IER<R: Register>(UnsafeCell<R>);
+// 接收缓冲寄存器和发送保持寄存器。
+gen_reg!(RBR_THR);
+// 中断使能寄存器。
+gen_reg!(IER);
 
-/// 中断识别寄存器和队列控制寄存器。
-#[allow(non_camel_case_types)]
-#[repr(transparent)]
-pub struct IIR_FCR<R: Register>(UnsafeCell<R>);
+// 中断识别寄存器和队列控制寄存器。
+gen_reg!(IIR_FCR);
 
-/// 线路控制寄存器。
-#[repr(transparent)]
-pub struct LCR<R: Register>(UnsafeCell<R>);
-
-/// 调制解调器控制寄存器。
-#[repr(transparent)]
-pub struct MCR<R: Register>(UnsafeCell<R>);
-
-/// 线路状态寄存器。
-#[repr(transparent)]
-pub struct LSR<R: Register>(UnsafeCell<R>);
-
-/// 调制解调器状态寄存器。
-#[repr(transparent)]
-pub struct MSR<R: Register>(UnsafeCell<R>);
+// 线路控制寄存器。
+gen_reg!(LCR);
+// 调制解调器控制寄存器。
+gen_reg!(MCR);
+// 线路状态寄存器。
+gen_reg!(LSR);
+// 调制解调器状态寄存器。
+gen_reg!(MSR);
 
 /// 工作状态的 uart16550 数据结构。
 #[repr(C)]
@@ -87,9 +91,68 @@ pub struct Uart16550<R: Register> {
     mcr: MCR<R>,         // offset = 4(0x10)
     lsr: LSR<R>,         // offset = 5(0x14)
     msr: MSR<R>,         // offset = 6(0x18)
+    io_region: Box<dyn Uart16550IO<R>>,
+}
+/// The trait for uart16550 io.
+/// User should implement this trait to use uart16550.
+pub trait Uart16550IO<R: Register>: Debug + Send + Sync {
+    /// Read from the register at the offset.
+    fn read_at(&self, offset: usize) -> R;
+    /// Write to the register at the offset.
+    fn write_at(&self, offset: usize, value: R);
+}
+
+impl<R: Register> Uart16550IO<R> for Box<dyn Uart16550IO<R>> {
+    fn read_at(&self, offset: usize) -> R {
+        self.as_ref().read_at(offset)
+    }
+
+    fn write_at(&self, offset: usize, value: R) {
+        self.as_ref().write_at(offset, value)
+    }
 }
 
 impl<R: Register> Uart16550<R> {
+    /// Create a new Uart16550 instance.
+    pub fn new(io_region: Box<dyn Uart16550IO<R>>) -> Self {
+        Self {
+            rbr_thr: RBR_THR {
+                offset: 0,
+                phantom_data: PhantomData,
+            },
+            ier: IER {
+                offset: core::mem::size_of::<R>(),
+                phantom_data: PhantomData,
+            },
+            iir_fcr: IIR_FCR {
+                offset: 2 * core::mem::size_of::<R>(),
+                phantom_data: PhantomData,
+            },
+            lcr: LCR {
+                offset: 3 * core::mem::size_of::<R>(),
+                phantom_data: PhantomData,
+            },
+            mcr: MCR {
+                offset: 4 * core::mem::size_of::<R>(),
+                phantom_data: PhantomData,
+            },
+            lsr: LSR {
+                offset: 5 * core::mem::size_of::<R>(),
+                phantom_data: PhantomData,
+            },
+            msr: MSR {
+                offset: 6 * core::mem::size_of::<R>(),
+                phantom_data: PhantomData,
+            },
+            io_region,
+        }
+    }
+
+    /// 取出 IO 区域。
+    pub fn io_region(&self) -> &dyn Uart16550IO<R> {
+        self.io_region.as_ref()
+    }
+
     /// 取出接收缓冲和发送保持寄存器。
     #[inline]
     pub fn rbr_thr(&self) -> &RBR_THR<R> {
@@ -134,21 +197,24 @@ impl<R: Register> Uart16550<R> {
 
     /// 将分频系数写入锁存器。
     pub fn write_divisor(&self, divisor: u16) {
-        let lcr = self.lcr.read();
-        self.lcr.write(lcr.enable_dlr_access());
-        unsafe {
-            self.rbr_thr.0.get().write(R::from(divisor as _));
-            self.ier.0.get().write(R::from((divisor >> 8) as _));
-        }
-        self.lcr.write(lcr);
+        let io_region = self.io_region();
+        let lcr = self.lcr().read(io_region);
+        self.lcr().write(io_region, lcr.enable_dlr_access());
+
+        self.rbr_thr().write(io_region, R::from(divisor as _));
+        self.ier()
+            .write_divisor(io_region, R::from((divisor >> 8) as _));
+
+        self.lcr().write(io_region, lcr);
     }
 
     /// 从接收队列读取字符到 `buf`，返回读取的字符数。
     pub fn read(&self, buf: &mut [u8]) -> usize {
+        let io_region = self.io_region();
         let mut count = 0usize;
         for c in buf {
-            if self.lsr.read().is_data_ready() {
-                *c = self.rbr_thr.rx_data();
+            if self.lsr().read(io_region).is_data_ready() {
+                *c = self.rbr_thr().rx_data(io_region);
                 count += 1;
             } else {
                 break;
@@ -159,10 +225,11 @@ impl<R: Register> Uart16550<R> {
 
     /// 从 `buf` 写入字符到发送队列，返回写入的字符数。
     pub fn write(&self, buf: &[u8]) -> usize {
+        let io_region = self.io_region();
         let mut count = 0usize;
         for c in buf {
-            if self.lsr.read().is_transmitter_fifo_empty() {
-                self.rbr_thr.tx_data(*c);
+            if self.lsr().read(io_region).is_transmitter_fifo_empty() {
+                self.rbr_thr().tx_data(io_region, *c);
                 count += 1;
             } else {
                 break;

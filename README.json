@@ -1,0 +1,10 @@
+{
+  "name": "uart16550",
+  "description": "Provide definition of 16550 uart registers.",
+  "authors": [{
+    "name": "chenlinfeng ",
+    "email": "chenlinfeng25@outlook.com"
+  }],
+  "keywords": ["embedded", "hardware-support", "uart16550"],
+  "doc_url": "https://github.com/kern-crates/uart16550/blob/main/README.md"
+}
